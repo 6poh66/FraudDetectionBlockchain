@@ -1,0 +1,112 @@
+const API = "http://127.0.0.1:5000";
+<!DOCTYPE html>
+
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Fraud Alert Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    h1 { margin-top: 0; }
+    code { background: #f7f7f7; padding: 2px 6px; border-radius: 6px; }
+    .row { display:flex; gap:16px; flex-wrap: wrap; }
+    .col { flex: 1; min-width: 280px; }
+    button { padding: 8px 12px; border-radius: 8px; border: 1px solid #333; cursor: pointer; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    .green { color: #0a7; }
+    .red { color: #c00; }
+    small { color:#666; }
+  </style>
+</head>
+<body>
+  <h1>Fraud Alert Dashboard</h1>
+
+  <div class="row">
+    <div class="col card">
+      <h3>Contract</h3>
+      <div>Address: <code id="contract">—</code></div>
+      <div>Threshold: <code id="threshold">—</code></div>
+    </div>
+    <div class="col card">
+      <h3>Last Prediction</h3>
+      <div>Fraud Flag: <b id="flag">—</b></div>
+      <div>Score: <code id="score">—</code></div>
+      <div>Tx Hash: <code id="tx">—</code></div>
+      <div><small>Updated: <span id="updated">—</span></small></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Send Test Prediction</h3>
+    <p>Paste 27 features (comma-separated). This will call your Flask <code>/predict</code> and, if flagged, write to the chain.</p>
+    <textarea id="features" style="width:100%;height:100px;">-1.359807, -0.072781, 2.536347, 1.378155, -0.338321, 0.462388, 0.239599, 0.098698, 0.363787, 0.090794, -0.551600, -0.617801, -0.991390, -0.311169, 1.468177, -0.470401, 0.207971, 0.025791, 0.403993, 0.251412, -0.018307, 0.277838, -0.110474, 0.066928, 0.128539, -0.189115, 149.62</textarea>
+    <br/><br/>
+    <button id="btn">Predict</button>
+    <span id="msg"></span>
+  </div>
+
+  <div class="card">
+    <h3>Recent On-Chain FraudAlert Events</h3>
+    <table>
+      <thead>
+        <tr><th>Tx Hash</th><th>By</th><th>Reason</th><th>Time</th><th>Block</th></tr>
+      </thead>
+      <tbody id="events"></tbody>
+    </table>
+  </div>
+
+<script>
+async function loadStatus(){
+  const res = await fetch('/status'); const s = await res.json();
+  document.getElementById('contract').textContent = s.contract || '—';
+  document.getElementById('threshold').textContent = s.threshold ?? '—';
+  document.getElementById('flag').textContent = s.last_flag === 1 ? 'Fraud (1)' : (s.last_flag === 0 ? 'Not Fraud (0)' : '—');
+  document.getElementById('flag').className = s.last_flag === 1 ? 'red' : 'green';
+  document.getElementById('score').textContent = s.last_score ?? '—';
+  document.getElementById('tx').textContent = s.last_tx || '—';
+  document.getElementById('updated').textContent = s.updated_at ? new Date(s.updated_at*1000).toLocaleString() : '—';
+}
+
+async function loadEvents(){
+  const res = await fetch('/events'); const {events} = await res.json();
+  const tbody = document.getElementById('events');
+  tbody.innerHTML = '';
+  events.slice().reverse().forEach(ev => {
+    const tr = document.createElement('tr');
+    const tds = [
+      `<code>${ev.tx_hash.slice(0,10)}…</code>`,
+      `<code>${ev.triggeredBy.slice(0,10)}…</code>`,
+      ev.reason,
+      new Date(ev.timestamp*1000).toLocaleString(),
+      ev.blockNumber
+    ].map(html => { const td=document.createElement('td'); td.innerHTML=html; return td; });
+    tds.forEach(td=>tr.appendChild(td));
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('btn').onclick = async () => {
+  const msg = document.getElementById('msg');
+  msg.textContent = 'Sending...';
+  try {
+    const txt = document.getElementById('features').value.trim();
+    const arr = txt.split(',').map(s => parseFloat(s.trim())).filter(v => !Number.isNaN(v));
+    if (arr.length !== 27) { msg.textContent = `Need 27 numbers, you gave ${arr.length}`; return; }
+    const res = await fetch('/predict', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({features: arr}) });
+    const out = await res.json();
+    msg.textContent = `fraud=${out.fraud}, score=${out.score}, tx=${out.tx_hash || '—'}`;
+  } catch(e) {
+    console.error(e); msg.textContent = 'Error. Check console.';
+  }
+  await loadStatus(); await loadEvents();
+};
+
+loadStatus(); loadEvents();
+setInterval(()=>{ loadStatus(); loadEvents(); }, 5000);
+</script>
+</body>
+</html>
+
